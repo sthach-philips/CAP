@@ -5,7 +5,7 @@ RabbitMQ is an open-source message broker software that implements the Advanced 
 RabbitMQ can be used in CAP as a message transporter. 
 
 !!! warning "Important Notes"
-    CAP declares queues and bindings when a consumer starts and registers its subscriptions. If a message is published before its queue and binding exist, RabbitMQ does not retain it for that queue. In production, start consumers before publishing or provision the required queues and bindings in advance.
+    CAP declares queues and bindings when a consumer starts and registers its subscriptions. If a message is published before its queue and binding exist, RabbitMQ does not retain it for that queue. With the default `MandatoryPublishing=false`, CAP can still report an unroutable publish as successful. In production, start consumers before publishing or provision the required queues and bindings in advance. Enable mandatory publishing and tracked confirmations to have unroutable publishes fail.
 
 ## Configuration
 
@@ -52,7 +52,10 @@ QueueArguments  | Extra queue `x-arguments` | QueueArgumentsOptions  |  N/A
 QueueOptions  | Change Options for created queue | QueueRabbitOptions  |  { Durable=true, Exclusive=false, AutoDelete=false }
 ConnectionFactoryOptions  |  RabbitMQClient native connection options | ConnectionFactory | N/A
 CustomHeadersBuilder  | Custom subscribe headers |  See the blow |  N/A
-PublishConfirms | Enable [publish confirms](https://www.rabbitmq.com/confirms.html#publisher-confirms) | bool | false
+PublishConfirms | Enable [publisher confirms](https://www.rabbitmq.com/confirms.html#publisher-confirms) on the channel | bool | false
+PublisherConfirmationTracking | Wait for a per-message broker acknowledgement or negative acknowledgement. Requires `PublishConfirms=true`. | bool | false
+MandatoryPublishing | Publish as mandatory and fail when RabbitMQ returns an unroutable message. Requires `PublishConfirms=true` and `PublisherConfirmationTracking=true`. | bool | false
+DeclareExchange | Declare CAP's topic exchange, or passively check that it already exists when false. | bool | true
 BasicQosOptions | Specify [Qos](https://www.rabbitmq.com/consumer-prefetch.html) of message prefetch | BasicQos | N/A
 
 `QueueArguments` supports these optional queue declaration arguments:
@@ -62,6 +65,45 @@ BasicQosOptions | Specify [Qos](https://www.rabbitmq.com/consumer-prefetch.html)
 | `QueueType` | Queue type, such as `classic` or `quorum` (`x-queue-type`). | Not set |
 | `QueueMode` | Queue mode (`x-queue-mode`). | Not set |
 | `MessageTTL` | Message time-to-live in milliseconds (`x-message-ttl`). | 864000000 (10 days) |
+
+
+#### Publisher confirms and mandatory publishing
+
+`PublishConfirms` enables confirm mode on the RabbitMQ channel. For backward
+compatibility, it does not by itself make CAP wait for an individual publish
+acknowledgement; `PublisherConfirmationTracking` enables RabbitMQ.Client's
+per-publication tracking and awaits the broker's ack or nack. A nack is returned
+as a failed CAP send.
+
+`MandatoryPublishing` asks RabbitMQ to return a message when no queue is bound
+for its routing key. With confirmation tracking enabled, a returned message
+fails the CAP send even if RabbitMQ also acknowledges the publish. These settings
+are opt-in and do not prove that a consumer processed a message or prevent
+redelivery after an ambiguous connection failure.
+
+The required combination is:
+
+```csharp
+o.UseRabbitMQ(options =>
+{
+    options.PublishConfirms = true;
+    options.PublisherConfirmationTracking = true;
+    options.MandatoryPublishing = true;
+});
+```
+
+Enabling confirmation tracking without `PublishConfirms`, or mandatory publishing
+without confirmation tracking, fails options validation at application startup.
+
+#### Externally managed exchanges
+
+Set `DeclareExchange=false` when the exchange is provisioned outside CAP. CAP
+checks that the exchange exists with a passive declaration at startup and when
+creating publisher and consumer channels; it never creates the exchange in this
+mode. A missing exchange causes startup/channel creation to fail. CAP still
+creates consumer queues and bindings, so this setting does not make the entire
+transport topology read-only. The RabbitMQ user still needs permissions for passive
+exchange checks, publishing, and CAP's queue and binding declarations.
 
 #### ConnectionFactory Option
 

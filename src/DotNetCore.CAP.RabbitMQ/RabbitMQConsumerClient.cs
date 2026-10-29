@@ -112,40 +112,62 @@ internal sealed class RabbitMqConsumerClient : IConsumerClient
         var connection = _connectionChannelPool.GetConnection();
 
         await _semaphore.WaitAsync();
-
-        if (_channel == null || _channel.IsClosed)
+        try
         {
-            _channel = await connection.CreateChannelAsync();
-
-            await _channel.ExchangeDeclareAsync(_exchangeName, RabbitMQOptions.ExchangeType, true);
-
-            var arguments = new Dictionary<string, object?>
+            if (_channel == null || _channel.IsClosed)
             {
-                { "x-message-ttl", _rabbitMqOptions.QueueArguments.MessageTTL }
-            };
-
-            if (!string.IsNullOrEmpty(_rabbitMqOptions.QueueArguments.QueueMode))
-                arguments.Add("x-queue-mode", _rabbitMqOptions.QueueArguments.QueueMode);
-
-            if (!string.IsNullOrEmpty(_rabbitMqOptions.QueueArguments.QueueType))
-                arguments.Add("x-queue-type", _rabbitMqOptions.QueueArguments.QueueType);
-
-            try
-            {
-                await _channel.QueueDeclareAsync(_queueName, _rabbitMqOptions.QueueOptions.Durable, _rabbitMqOptions.QueueOptions.Exclusive, _rabbitMqOptions.QueueOptions.AutoDelete, arguments);
-            }
-            catch (TimeoutException ex)
-            {
-                var args = new LogMessageEventArgs
+                _channel?.Dispose();
+                IChannel? channel = null;
+                try
                 {
-                    LogType = MqLogType.ConsumerShutdown,
-                    Reason = ex.Message + "-->" + nameof(_channel.QueueDeclareAsync)
-                };
+                    channel = await connection.CreateChannelAsync();
+                    if (_rabbitMqOptions.DeclareExchange)
+                    {
+                        await channel.ExchangeDeclareAsync(_exchangeName, RabbitMQOptions.ExchangeType, true);
+                    }
+                    else
+                    {
+                        await channel.ExchangeDeclarePassiveAsync(_exchangeName);
+                    }
 
-                OnLogCallback!(args);
+                    var arguments = new Dictionary<string, object?>
+                    {
+                        { "x-message-ttl", _rabbitMqOptions.QueueArguments.MessageTTL }
+                    };
+
+                    if (!string.IsNullOrEmpty(_rabbitMqOptions.QueueArguments.QueueMode))
+                        arguments.Add("x-queue-mode", _rabbitMqOptions.QueueArguments.QueueMode);
+
+                    if (!string.IsNullOrEmpty(_rabbitMqOptions.QueueArguments.QueueType))
+                        arguments.Add("x-queue-type", _rabbitMqOptions.QueueArguments.QueueType);
+
+                    try
+                    {
+                        await channel.QueueDeclareAsync(_queueName, _rabbitMqOptions.QueueOptions.Durable, _rabbitMqOptions.QueueOptions.Exclusive, _rabbitMqOptions.QueueOptions.AutoDelete, arguments);
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        var args = new LogMessageEventArgs
+                        {
+                            LogType = MqLogType.ConsumerShutdown,
+                            Reason = ex.Message + "-->" + nameof(_channel.QueueDeclareAsync)
+                        };
+
+                        OnLogCallback!(args);
+                    }
+
+                    _channel = channel;
+                }
+                catch
+                {
+                    if (channel != null) await channel.DisposeAsync();
+                    throw;
+                }
             }
         }
-
-        _semaphore.Release();
+        finally
+        {
+            _semaphore.Release();
+        }
     }
 }

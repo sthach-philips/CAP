@@ -14,4 +14,8 @@
     <ProjectReference Include="..\DotNetCore.CAP\DotNetCore.CAP.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotNetCore.CAP.RabbitMQ.Test" />
+  </ItemGroup>
+
 </Project>

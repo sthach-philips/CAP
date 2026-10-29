@@ -70,6 +70,24 @@ public class RabbitMQOptions
     public bool PublishConfirms { get; set; }
 
     /// <summary>
+    /// Wait for a broker acknowledgement or negative acknowledgement for each published message.
+    /// Requires <see cref="PublishConfirms"/> to be enabled.
+    /// </summary>
+    public bool PublisherConfirmationTracking { get; set; }
+
+    /// <summary>
+    /// Publish messages as mandatory so RabbitMQ returns messages that cannot be routed.
+    /// Requires <see cref="PublisherConfirmationTracking"/> to be enabled.
+    /// </summary>
+    public bool MandatoryPublishing { get; set; }
+
+    /// <summary>
+    /// Declare the topic exchange when channels are created. Set to <see langword="false"/>
+    /// to use passive checks and require the exchange to be provisioned externally.
+    /// </summary>
+    public bool DeclareExchange { get; set; } = true;
+
+    /// <summary>
     /// The port to connect on.
     /// </summary>
     public int Port { get; set; } = -1;
