@@ -29,6 +29,10 @@ internal sealed class RabbitMqCapOptionsExtension : ICapOptionsExtension
                 $"{nameof(RabbitMQOptions.PublisherConfirmationTracking)} requires {nameof(RabbitMQOptions.PublishConfirms)} to be enabled.")
             .Validate(options => !options.MandatoryPublishing || options.PublisherConfirmationTracking,
                 $"{nameof(RabbitMQOptions.MandatoryPublishing)} requires {nameof(RabbitMQOptions.PublisherConfirmationTracking)} to be enabled.")
+            .Validate(options => options.PublishConfirmTimeout is null || options.PublishConfirmTimeout > TimeSpan.Zero,
+                $"{nameof(RabbitMQOptions.PublishConfirmTimeout)} must be positive when set.")
+            .Validate(options => options.PublishConfirmTimeout is null || options.PublisherConfirmationTracking,
+                $"{nameof(RabbitMQOptions.PublishConfirmTimeout)} requires {nameof(RabbitMQOptions.PublisherConfirmationTracking)} to be enabled.")
             .ValidateOnStart();
         services.AddSingleton<ITransport, RabbitMqTransport>();
         services.AddSingleton<IConsumerClientFactory, RabbitMqConsumerClientFactory>();

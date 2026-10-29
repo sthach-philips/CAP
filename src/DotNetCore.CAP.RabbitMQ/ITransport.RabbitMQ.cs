@@ -3,6 +3,7 @@
 
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.CAP.Internal;
 using DotNetCore.CAP.Messages;
@@ -20,6 +21,7 @@ internal sealed class RabbitMqTransport : ITransport
     private readonly string _exchange;
     private readonly ILogger _logger;
     private readonly bool _mandatoryPublishing;
+    private readonly TimeSpan? _publishConfirmTimeout;
 
     public RabbitMqTransport(ILogger<RabbitMqTransport> logger, IConnectionChannelPool connectionChannelPool,
         IOptions<RabbitMQOptions> options)
@@ -28,6 +30,7 @@ internal sealed class RabbitMqTransport : ITransport
         _connectionChannelPool = connectionChannelPool;
         _exchange = _connectionChannelPool.Exchange;
         _mandatoryPublishing = options.Value.MandatoryPublishing;
+        _publishConfirmTimeout = options.Value.PublishConfirmTimeout;
     }
 
     public BrokerAddress BrokerAddress => new("RabbitMQ", _connectionChannelPool.HostAddress);
@@ -36,6 +39,7 @@ internal sealed class RabbitMqTransport : ITransport
     {
         IChannel? channel = null;
         var disposeChannel = false;
+        using var timeout = _publishConfirmTimeout.HasValue ? new CancellationTokenSource() : null;
         try
         {
             channel = await _connectionChannelPool.Rent();
@@ -47,7 +51,9 @@ internal sealed class RabbitMqTransport : ITransport
                 Headers = message.Headers.ToDictionary(x => x.Key, object? (x) => x.Value)
             };
 
-            await channel.BasicPublishAsync(_exchange, message.GetName(), _mandatoryPublishing, props, message.Body);
+            timeout?.CancelAfter(_publishConfirmTimeout!.Value);
+            await channel.BasicPublishAsync(_exchange, message.GetName(), _mandatoryPublishing, props, message.Body,
+                timeout?.Token ?? CancellationToken.None);
 
             _logger.LogInformation("CAP message '{0}' published, internal id '{1}'", message.GetName(), message.GetId());
 
@@ -68,6 +74,8 @@ internal sealed class RabbitMqTransport : ITransport
             {
                 PublishException { IsReturn: true } => $"RabbitMQ returned the message from exchange '{_exchange}' because it could not be routed.",
                 PublishException => "RabbitMQ negatively acknowledged the published message.",
+                OperationCanceledException when timeout?.IsCancellationRequested == true =>
+                    $"RabbitMQ did not confirm the published message within {nameof(RabbitMQOptions.PublishConfirmTimeout)} ({_publishConfirmTimeout}).",
                 _ => ex.Message
             };
             var wrapperEx = new PublisherSentFailedException(description, ex);
@@ -83,22 +91,32 @@ internal sealed class RabbitMqTransport : ITransport
         {
             if (channel != null)
             {
-                if (disposeChannel)
-                {
-                    try
-                    {
-                        await channel.DisposeAsync();
-                    }
-                    catch (Exception disposeException)
-                    {
-                        _logger.LogWarning(disposeException, "Failed to dispose a RabbitMQ channel after a publish failure.");
-                    }
-                }
-                else
+                if (!disposeChannel)
                 {
                     _connectionChannelPool.Return(channel);
                 }
+                else if (timeout?.IsCancellationRequested == true)
+                {
+                    // Closing waits for the unresponsive broker, so do not hold the failed send for it.
+                    _ = DisposeChannelAsync(channel);
+                }
+                else
+                {
+                    await DisposeChannelAsync(channel);
+                }
             }
+        }
+    }
+
+    private async Task DisposeChannelAsync(IChannel channel)
+    {
+        try
+        {
+            await channel.DisposeAsync();
+        }
+        catch (Exception disposeException)
+        {
+            _logger.LogWarning(disposeException, "Failed to dispose a RabbitMQ channel after a publish failure.");
         }
     }
 }

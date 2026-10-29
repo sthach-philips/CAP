@@ -55,6 +55,7 @@ CustomHeadersBuilder  | Custom subscribe headers |  See the blow |  N/A
 PublishConfirms | Enable [publisher confirms](https://www.rabbitmq.com/confirms.html#publisher-confirms) on the channel | bool | false
 PublisherConfirmationTracking | Wait for a per-message broker acknowledgement or negative acknowledgement. Requires `PublishConfirms=true`. | bool | false
 MandatoryPublishing | Publish as mandatory and fail when RabbitMQ returns an unroutable message. Requires `PublishConfirms=true` and `PublisherConfirmationTracking=true`. | bool | false
+PublishConfirmTimeout | Maximum time to wait for one publish and its broker confirmation before the send fails. `null` applies no CAP-specific limit. Requires `PublisherConfirmationTracking=true`; must be positive. | TimeSpan? | null
 DeclareExchange | Declare CAP's topic exchange, or passively check that it already exists when false. | bool | true
 BasicQosOptions | Specify [Qos](https://www.rabbitmq.com/consumer-prefetch.html) of message prefetch | BasicQos | N/A
 
@@ -94,6 +95,15 @@ o.UseRabbitMQ(options =>
 
 Enabling confirmation tracking without `PublishConfirms`, or mandatory publishing
 without confirmation tracking, fails options validation at application startup.
+
+Set `PublishConfirmTimeout` to bound how long a tracked publish may wait for the
+broker, for example when RabbitMQ blocks publishers or stops responding. When the
+timeout elapses, the CAP send fails and the channel is discarded rather than
+returned to the pool; CAP's normal retry handling applies. A timeout is
+ambiguous: the broker may still have accepted the message, so consumers should
+be idempotent. The option requires `PublisherConfirmationTracking=true`, because
+without tracking the publish completes once the frame is written and there is no
+confirmation to wait for.
 
 #### Externally managed exchanges
 

@@ -20,6 +20,7 @@ public sealed class RabbitMQOptionsTests
         Assert.False(options.PublisherConfirmationTracking);
         Assert.False(options.MandatoryPublishing);
         Assert.True(options.DeclareExchange);
+        Assert.Null(options.PublishConfirmTimeout);
     }
 
     [Fact]
@@ -55,6 +56,29 @@ public sealed class RabbitMQOptionsTests
         var check = provider.GetServices<IHostedService>().OfType<RabbitMQExchangeStartupCheck>().Single();
 
         await check.StartAsync(CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(true, true, 0)]
+    [InlineData(true, true, -1)]
+    [InlineData(true, false, 1)]
+    public void Invalid_publish_confirm_timeout_fails_options_validation(bool publishConfirms,
+        bool trackConfirmations, int timeoutSeconds)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        new RabbitMqCapOptionsExtension(options =>
+        {
+            options.PublishConfirms = publishConfirms;
+            options.PublisherConfirmationTracking = trackConfirmations;
+            options.PublishConfirmTimeout = TimeSpan.FromSeconds(timeoutSeconds);
+        }).AddServices(services);
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+            provider.GetRequiredService<IOptions<RabbitMQOptions>>().Value);
+
+        Assert.Contains(nameof(RabbitMQOptions.PublishConfirmTimeout), exception.Message);
     }
 
     [Theory]

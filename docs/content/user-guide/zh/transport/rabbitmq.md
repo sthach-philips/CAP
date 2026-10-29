@@ -56,6 +56,7 @@ CustomHeadersBuilder  | 订阅者自定义头信息 |  见下文 |  N/A
 PublishConfirms | 在通道上启用[发布确认](https://www.rabbitmq.com/confirms.html#publisher-confirms) | bool | false
 PublisherConfirmationTracking | 等待每条消息的代理确认或拒绝确认。要求 `PublishConfirms=true`。 | bool | false
 MandatoryPublishing | 使用强制发布；RabbitMQ 返回无法路由的消息时使发布失败。要求 `PublishConfirms=true` 且 `PublisherConfirmationTracking=true`。 | bool | false
+PublishConfirmTimeout | 单次发布及其代理确认的最长等待时间，超时后发送失败。`null` 表示 CAP 不额外限制。要求 `PublisherConfirmationTracking=true`，且必须为正值。 | TimeSpan? | null
 DeclareExchange | 声明 CAP 的 topic exchange；设为 false 时仅被动检查其是否存在。 | bool | true
 BasicQosOptions | 指定消费的[Qos](https://www.rabbitmq.com/consumer-prefetch.html) | BasicQos | N/A
 
@@ -92,6 +93,11 @@ o.UseRabbitMQ(options =>
 
 未启用 `PublishConfirms` 却启用确认跟踪，或未启用确认跟踪却启用强制发布，都会在应用
 启动时导致选项验证失败。
+
+可设置 `PublishConfirmTimeout` 限制已跟踪的发布等待代理的时间，例如 RabbitMQ 阻塞发布者
+或停止响应时。超时后，CAP 发送失败，该通道会被丢弃而不会归还连接池，随后按 CAP 的常规
+重试机制处理。超时结果并不确定：代理可能仍已接收该消息，因此消费者应保持幂等。该选项要求
+`PublisherConfirmationTracking=true`，因为未启用跟踪时，发布在帧写出后即完成，不存在可等待的确认。
 
 #### 外部管理的 Exchange
 
