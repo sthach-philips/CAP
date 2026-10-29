@@ -20,6 +20,8 @@ public class ConnectionChannelPool : IConnectionChannelPool, IDisposable
 
     private readonly Func<Task<IConnection>> _connectionActivator;
     private readonly bool _isPublishConfirms;
+    private readonly bool _publisherConfirmationTracking;
+    private readonly bool _declareExchange;
     private readonly ILogger<ConnectionChannelPool> _logger;
     private readonly ConcurrentQueue<IChannel> _pool;
     private IConnection? _connection;
@@ -41,6 +43,8 @@ public class ConnectionChannelPool : IConnectionChannelPool, IDisposable
 
         _connectionActivator = CreateConnection(options);
         _isPublishConfirms = options.PublishConfirms;
+        _publisherConfirmationTracking = options.PublisherConfirmationTracking;
+        _declareExchange = options.DeclareExchange;
 
         HostAddress = $"{options.HostName}:{options.Port}";
         Exchange = "v1" == capOptions.Version ? options.ExchangeName : $"{options.ExchangeName}.{capOptions.Version}";
@@ -135,13 +139,31 @@ public class ConnectionChannelPool : IConnectionChannelPool, IDisposable
 
         try
         {
-            model = await GetConnection().CreateChannelAsync(new CreateChannelOptions(_isPublishConfirms, false));
-            await model.ExchangeDeclareAsync(Exchange, RabbitMQOptions.ExchangeType, true);
+            model = await GetConnection().CreateChannelAsync(new CreateChannelOptions(
+                _isPublishConfirms, _publisherConfirmationTracking));
+            if (_declareExchange)
+            {
+                await model.ExchangeDeclareAsync(Exchange, RabbitMQOptions.ExchangeType, true);
+            }
+            else
+            {
+                await model.ExchangeDeclarePassiveAsync(Exchange);
+            }
         }
         catch (Exception e)
         {
+            if (model != null)
+            {
+                try
+                {
+                    await model.DisposeAsync();
+                }
+                catch (Exception disposeException)
+                {
+                    _logger.LogWarning(disposeException, "Failed to dispose a RabbitMQ channel after channel setup failed.");
+                }
+            }
             _logger.LogError(e, "RabbitMQ channel model create failed!");
-            Console.WriteLine(e);
             throw;
         }
 

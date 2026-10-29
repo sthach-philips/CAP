@@ -5,6 +5,7 @@ using System;
 using DotNetCore.CAP.RabbitMQ;
 using DotNetCore.CAP.Transport;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 // ReSharper disable once CheckNamespace
 namespace DotNetCore.CAP;
@@ -22,9 +23,20 @@ internal sealed class RabbitMqCapOptionsExtension : ICapOptionsExtension
     {
         services.AddSingleton(new CapMessageQueueMakerService("RabbitMQ"));
 
-        services.Configure(_configure);
+        services.AddOptions<RabbitMQOptions>()
+            .Configure(_configure)
+            .Validate(options => !options.PublisherConfirmationTracking || options.PublishConfirms,
+                $"{nameof(RabbitMQOptions.PublisherConfirmationTracking)} requires {nameof(RabbitMQOptions.PublishConfirms)} to be enabled.")
+            .Validate(options => !options.MandatoryPublishing || options.PublisherConfirmationTracking,
+                $"{nameof(RabbitMQOptions.MandatoryPublishing)} requires {nameof(RabbitMQOptions.PublisherConfirmationTracking)} to be enabled.")
+            .Validate(options => options.PublishConfirmTimeout is null || options.PublishConfirmTimeout > TimeSpan.Zero,
+                $"{nameof(RabbitMQOptions.PublishConfirmTimeout)} must be positive when set.")
+            .Validate(options => options.PublishConfirmTimeout is null || options.PublisherConfirmationTracking,
+                $"{nameof(RabbitMQOptions.PublishConfirmTimeout)} requires {nameof(RabbitMQOptions.PublisherConfirmationTracking)} to be enabled.")
+            .ValidateOnStart();
         services.AddSingleton<ITransport, RabbitMqTransport>();
         services.AddSingleton<IConsumerClientFactory, RabbitMqConsumerClientFactory>();
         services.AddSingleton<IConnectionChannelPool, ConnectionChannelPool>();
+        services.AddSingleton<IHostedService, RabbitMQExchangeStartupCheck>();
     }
 }
